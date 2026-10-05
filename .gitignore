@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+
+# scikit-build-core output when nes_py is built from source
+build-pip/
+
+# Training outputs
+runs/
+checkpoints/
+*.zip
+*.onnx
+model.json
+
+# Gameplay recordings
+recordings/
+*.nesdemo
+
+# ROMs (never commit commercial ROMs); the test ROM is the one exception
+*.nes
+!tests/roms/nestest.nes
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
