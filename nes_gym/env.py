@@ -59,6 +59,12 @@ class NesEnv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=255, shape=shape, dtype=np.uint8)
 
         self._start_state: bytes | None = None
+        # The emulator's save state doesn't include the drawn image (that keeps states small), so after load_state()
+        # frame() and obs84() still show the previous episode until the next frame is drawn. The start images are
+        # cached alongside the start state and returned until the first step.
+        self._start_frame: np.ndarray | None = None
+        self._start_obs84: np.ndarray | None = None
+        self._at_start = False
         self._prev_ram: np.ndarray | None = None
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
@@ -66,8 +72,11 @@ class NesEnv(gym.Env):
         if self._start_state is None:
             self.game.boot(self.core)
             self._start_state = self.core.save_state()
+            self._start_frame = self.core.frame()
+            self._start_obs84 = self.core.obs84()
         else:
             self.core.load_state(self._start_state)
+        self._at_start = True
 
         ram = self.core.ram()
         self._prev_ram = ram
@@ -78,6 +87,7 @@ class NesEnv(gym.Env):
             raise RuntimeError("call reset() before step()")
 
         self.core.step(self.game.actions[int(action)], frames=self.frame_skip)
+        self._at_start = False
         ram = self.core.ram()
         reward = float(self.game.reward(self._prev_ram, ram))
         terminated = bool(self.game.terminated(ram))
@@ -87,11 +97,12 @@ class NesEnv(gym.Env):
 
     def render(self):
         if self.render_mode == "rgb_array":
-            return self.core.frame()
+            return self._start_frame.copy() if self._at_start else self.core.frame()
         return None
 
     def _observe(self, ram: np.ndarray) -> np.ndarray:
         if self.obs_type == "pixels":
-            return self.core.obs84()[..., np.newaxis]
+            obs = self._start_obs84.copy() if self._at_start else self.core.obs84()
+            return obs[..., np.newaxis]
         # A copy, so a caller modifying the observation can't change the RAM the next reward is computed from.
         return ram.copy()
