@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  test:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Keep in sync with requires-python in pyproject.toml and the emulator's CI.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      # nes_py is built from the emulator's source during install; the core needs C++23.
+      - name: Install GCC 14 and Ninja
+        run: sudo apt-get update && sudo apt-get install -y g++-14 ninja-build
+
+      - name: Install nes-agents and nes_py
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: python -m pip install .[test]
+
+      # Tests that need a commercial ROM (SMB_ROM etc.) skip here.
+      - name: Run tests
+        run: python -m pytest
