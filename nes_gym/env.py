@@ -59,8 +59,8 @@ class NesEnv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=255, shape=shape, dtype=np.uint8)
 
         self._start_state: bytes | None = None
-        # The emulator's save state doesn't include the drawn image (that keeps states small), so after load_state()
-        # frame() and obs84() still show the previous episode until the next frame is drawn. The start images are
+        # The emulator's save state doesn't include the drawn image, so after load_state() frame() 
+        # and obs84() still show the previous episode until the next frame is drawn. The start images are
         # cached alongside the start state and returned until the first step.
         self._start_frame: np.ndarray | None = None
         self._start_obs84: np.ndarray | None = None

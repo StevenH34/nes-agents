@@ -96,6 +96,11 @@ def env(smb_rom):
     return NesEnv(smb_rom, game="smb", obs_type="ram")
 
 
+@pytest.fixture
+def pixel_env(smb_rom):
+    return NesEnv(smb_rom, game="smb", obs_type="pixels", render_mode="rgb_array")
+
+
 def test_boot_lands_in_1_1(env):
     _, info = env.reset()
     assert info["world"] == 1
@@ -111,6 +116,20 @@ def test_reset_is_deterministic(env):
         env.step(RUN_RIGHT)
     second, _ = env.reset()
     np.testing.assert_array_equal(first, second)
+
+
+def test_reset_after_death_shows_start_of_1_1(pixel_env):
+    """After dying, the next episode's first observation and screen are the start of 1-1, not the death frame."""
+    first_obs, _ = pixel_env.reset()
+    first_frame = pixel_env.render()
+    for _ in range(200):
+        _, _, terminated, _, _ = pixel_env.step(RUN_RIGHT)
+        if terminated:
+            break
+    assert terminated
+    obs, _ = pixel_env.reset()
+    np.testing.assert_array_equal(first_obs, obs)
+    np.testing.assert_array_equal(first_frame, pixel_env.render())
 
 
 def test_running_right_earns_reward(env):

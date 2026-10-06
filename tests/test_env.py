@@ -46,13 +46,35 @@ def test_action_space_matches_game(nestest_rom):
     assert NesEnv(nestest_rom, game="null").action_space.n == len(NullSpec.actions)
 
 
-def test_reset_returns_same_start(nestest_rom):
-    env = NesEnv(nestest_rom, game="null", obs_type="ram")
+@pytest.mark.parametrize("obs_type", ["pixels", "ram"])
+def test_reset_returns_same_start(nestest_rom, obs_type):
+    """Pixels too: the save state doesn't include the drawn image, so a reloaded start must not show the old one."""
+    env = NesEnv(nestest_rom, game="null", obs_type=obs_type)
     first, _ = env.reset()
     for _ in range(10):
-        env.step(0)
+        moved, *_ = env.step(0)
+    assert not np.array_equal(first, moved), "the screen must change, or this test can't catch a stale image"
     second, _ = env.reset()
     np.testing.assert_array_equal(first, second)
+
+
+def test_render_after_reset_returns_start_frame(nestest_rom):
+    env = NesEnv(nestest_rom, game="null", render_mode="rgb_array")
+    env.reset()
+    first = env.render()
+    for _ in range(10):
+        env.step(0)
+    assert not np.array_equal(first, env.render())
+    env.reset()
+    np.testing.assert_array_equal(first, env.render())
+
+
+def test_reset_observation_is_a_copy(nestest_rom):
+    env = NesEnv(nestest_rom, game="null", obs_type="pixels")
+    first, _ = env.reset()
+    first[:] = 0xFF
+    second, _ = env.reset()
+    assert not np.array_equal(first, second)
 
 
 def test_boot_runs_once(nestest_rom, monkeypatch):
