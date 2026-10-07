@@ -12,7 +12,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
     # Builds nes_py from source (needs a C++23 compiler, CMake and Ninja). Bump the tag deliberately.
-    "nes-emulator-cpp @ git+https://github.com/StevenH34/nes-emulator-cpp@v0.1.0",
+    "nes-emulator-cpp @ git+https://github.com/StevenH34/nes-emulator-cpp@v0.2.0",
     "gymnasium~=1.4",
     "numpy",
 ]
