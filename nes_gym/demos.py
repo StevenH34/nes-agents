@@ -51,23 +51,45 @@ BUTTON_NAMES = (
 
 
 def mask_name(mask: int) -> str:
-    """Readable name for a button mask, e.g. "R+A"; "NOOP" for no buttons."""
+    """Returns a readable name for a button mask.
+
+    Args:
+        mask: The button mask.
+
+    Returns:
+        The pressed buttons joined with "+", e.g. "R+A", or "NOOP" if no buttons are pressed.
+    """
     return "+".join(name for bit, name in BUTTON_NAMES if mask & bit) or "NOOP"
 
 
 def nearest_action(mask: int, actions: tuple[int, ...]) -> int:
-    """Index of the action with the fewest buttons differing from `mask`. Ties go to the earlier action.
+    """Finds the action closest to a button mask.
 
-    Buttons no action uses (e.g. Start, Down) add the same distance to every action, so they never change the
-    choice: R+Down maps to R. Examples for SMB: B alone maps to NOOP, L+B to L, and L+A (equally far from A and L)
-    to A.
+    Distance is the number of buttons that differ. Ties go to the earlier action. Buttons no action uses (e.g. Start,
+    Down) add the same distance to every action, so they never change the choice: R+Down maps to R. Examples for
+    SMB: B alone maps to NOOP, L+B to L, and L+A (equally far from A and L) to A.
+
+    Args:
+        mask: The button mask to map.
+        actions: The game's actions, as button masks.
+
+    Returns:
+        The index into `actions` of the closest action.
     """
     return min(range(len(actions)), key=lambda i: ((mask ^ actions[i]).bit_count(), i))
 
 
 def window_mask(masks: np.ndarray) -> int:
-    """The most common mask in one window. Ties go to the mask held last: that's the player's current intent, and
-    it carries on into the next window."""
+    """Picks the button mask that represents one window.
+
+    Ties go to the mask held last: that's the player's current intent, and it carries on into the next window.
+
+    Args:
+        masks: The per-frame button masks in the window.
+
+    Returns:
+        The most common mask in the window.
+    """
     seq = masks.tolist()
     counts = Counter(seq)
     best = max(counts.values())
@@ -75,6 +97,15 @@ def window_mask(masks: np.ndarray) -> int:
 
 
 def _observe(core: nes_py.NesCore, obs_type: str) -> np.ndarray:
+    """Returns the current observation, in the same form as NesEnv's.
+
+    Args:
+        core: The emulator core to observe.
+        obs_type: "pixels" for the (84, 84, 1) screen, otherwise the (2048,) RAM.
+
+    Returns:
+        The observation as a uint8 array.
+    """
     if obs_type == "pixels":
         return core.obs84()[..., np.newaxis]
     return core.ram()
@@ -82,25 +113,37 @@ def _observe(core: nes_py.NesCore, obs_type: str) -> np.ndarray:
 
 @dataclass
 class Demo:
-    """The pairs from one recording."""
+    """The (observation, action) pairs from one recording.
+
+    Attributes:
+        path: The recording's file path.
+        observations: (T, 84, 84, 1) or (T, 2048) uint8, the same as NesEnv's observations.
+        actions: (T,) int64 indices into the game's actions.
+        episode_starts: (T,) bool, True on the first pair of each segment.
+        remapped: Maps (window mask, action index) to the number of windows whose mask wasn't one of the actions and
+            was remapped.
+        paused: The number of windows skipped because the game was paused.
+    """
 
     path: str
-    observations: np.ndarray  # (T, 84, 84, 1) or (T, 2048) uint8, the same as NesEnv's observations
-    actions: np.ndarray  # (T,) int64 indices into the game's actions
-    episode_starts: np.ndarray  # (T,) bool, True on the first pair of each segment
-    # (window mask, action index) -> number of windows whose mask wasn't one of the actions and was remapped.
+    observations: np.ndarray
+    actions: np.ndarray
+    episode_starts: np.ndarray
     remapped: Counter = field(default_factory=Counter)
-    paused: int = 0  # windows skipped because the game was paused
+    paused: int = 0
 
     def __len__(self) -> int:
+        """Returns the number of pairs."""
         return len(self.actions)
 
     @property
     def remap_count(self) -> int:
+        """The number of windows whose mask was remapped to a different action."""
         return sum(self.remapped.values())
 
     @property
     def segment_count(self) -> int:
+        """The number of segments, i.e. episodes, in the recording."""
         return int(self.episode_starts.sum())
 
 
@@ -111,9 +154,20 @@ def load_demo(
     obs_type: str = "pixels",
     frame_skip: int = 4,
 ) -> Demo:
-    """Replay one recording on `core` (which must have the recording's ROM loaded) and return its pairs.
+    """Replays one recording and converts it to (observation, action) pairs.
 
-    Raises ValueError if the recording was made on a different ROM.
+    Args:
+        path: The .nesdemo file.
+        core: The emulator core to replay on. It must have the recording's ROM loaded.
+        game: The game the recording is of.
+        obs_type: The observation type, one of OBS_TYPES.
+        frame_skip: The number of frames per window, matching one NesEnv step.
+
+    Returns:
+        The recording's pairs.
+
+    Raises:
+        ValueError: If `obs_type` or `frame_skip` is invalid, or the recording was made on a different ROM.
     """
     if obs_type not in OBS_TYPES:
         raise ValueError(f"Invalid observation type: {obs_type}. Expected one of {OBS_TYPES}.")
@@ -184,7 +238,14 @@ def load_demo(
 
 
 def find_recordings(paths: Iterable[str | os.PathLike]) -> list[Path]:
-    """Files as given, plus every *.nesdemo under each folder, sorted within the folder."""
+    """Finds the recordings in a list of files and folders.
+
+    Args:
+        paths: Files, kept as given, and folders, searched recursively for *.nesdemo.
+
+    Returns:
+        The files in the order given, with each folder's recordings sorted in its place.
+    """
     files = []
     for p in map(Path, paths):
         if p.is_dir():
@@ -201,8 +262,22 @@ def load_demos(
     obs_type: str = "pixels",
     frame_skip: int = 4,
 ) -> list[Demo]:
-    """Convert recordings (files, or folders searched for *.nesdemo) made on `rom_path`. `paths` is one path or
-    several. Raises ValueError on the first recording made on a different ROM."""
+    """Converts recordings made on one ROM to (observation, action) pairs.
+
+    Args:
+        paths: One path or several: files, or folders searched recursively for *.nesdemo.
+        rom_path: The ROM the recordings were made on.
+        game: The game's key in GAMES.
+        obs_type: The observation type, one of OBS_TYPES.
+        frame_skip: The number of frames per window, matching one NesEnv step.
+
+    Returns:
+        One Demo per recording, in the order find_recordings returns them.
+
+    Raises:
+        ValueError: If `game` is unknown, no recordings are found, `obs_type` or `frame_skip` is invalid, or a
+            recording was made on a different ROM (raised on the first such recording).
+    """
     if game not in GAMES:
         raise ValueError(f"Invalid game: {game!r}. Expected one of {sorted(GAMES)}.")
 
@@ -222,7 +297,17 @@ def load_demos(
 
 
 def remap_report(demos: list[Demo], actions: tuple[int, ...], top: int = 10) -> str:
-    """Per-recording pair, segment and remap counts, then the most common remaps across all of them."""
+    """Summarizes the pairs and action remapping in a set of recordings.
+
+    Args:
+        demos: The converted recordings.
+        actions: The game's actions, as button masks.
+        top: The number of most common remaps to list.
+
+    Returns:
+        One line per recording with its pair, segment, remap and paused-window counts, a total line, then the `top`
+        most common remaps across all recordings.
+    """
     lines = []
     total_pairs = total_remaps = total_paused = 0
     remapped = Counter()
@@ -250,6 +335,11 @@ def remap_report(demos: list[Demo], actions: tuple[int, ...], top: int = 10) -> 
 
 
 def main(argv=None) -> None:
+    """Converts recordings from the command line and prints the remap report.
+
+    Args:
+        argv: The command-line arguments, or None to use sys.argv.
+    """
     parser = argparse.ArgumentParser(description="Convert .nesdemo recordings and report action remapping")
     parser.add_argument("paths", nargs="+", help=f"{RECORDING_SUFFIX} files or folders containing them")
     parser.add_argument("--rom", required=True, help="the ROM the recordings were made on")
