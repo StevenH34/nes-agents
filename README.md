@@ -42,6 +42,38 @@ export SMB_ROM=/path/to/smb.nes         # macOS / Linux
 Only Mapper 0 games are supported by the emulator so far (e.g. Super Mario Bros., Donkey Kong, Balloon Fight,
 Excitebike, Ice Climber, Pac-Man).
 
+## Recordings to training data
+
+Record your play in the emulator's desktop app with F10. Each clip is saved as a `.nesdemo` file in a `recordings`
+folder next to the ROM. To check how the clips convert into `(observation, action)` pairs:
+
+```
+python -m nes_gym.demos --rom C:\path\to\smb.nes C:\path\to\recordings
+```
+
+Pass `.nesdemo` files or folders, which are searched for `.nesdemo` files. It prints, for each recording, the
+number of pairs and segments, how many windows had to be remapped to the game's actions, how many paused windows
+were skipped, and the most common remaps. Options: `--game` (default `smb`), `--obs pixels|ram`, `--frame-skip`
+(default 4, matching the environment).
+
+How a recording is converted:
+
+- It is replayed from its start state with the exact buttons pressed, so the emulator reproduces the play.
+- Each 4-frame window becomes one pair: the screen (or RAM) before the window, and the most common button
+  combination during it, mapped to the closest of the game's actions.
+- Only gameplay is kept. Deaths, level clears, lives screens, the title screen and pauses are skipped, and each
+  stretch of play is marked as a separate segment.
+
+A recording made on a different ROM is rejected. In Python, `load_demos` returns one `Demo` per recording:
+
+```python
+from nes_gym.demos import load_demos
+
+demos = load_demos("recordings", "smb.nes")
+demo = demos[0]
+demo.observations, demo.actions, demo.episode_starts
+```
+
 ## Testing
 
 `python -m pytest`
