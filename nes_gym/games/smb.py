@@ -1,5 +1,7 @@
-"""Super Mario Bros. (NES, Mapper 0). Checked against the real ROM: boot lands in 1-1, running right earns
-progress reward, the timer penalty fires every 24 frames, and running into the first Goomba ends the episode.
+"""Super Mario Bros. (NES, Mapper 0).
+
+Checked against the real ROM: boot lands in 1-1, running right earns progress reward, the timer penalty fires every 24
+frames, and running into the first Goomba ends the episode.
 
 RAM addresses and the reward follow gym-super-mario-bros (https://github.com/Kautenja/gym-super-mario-bros) and the
 SMB RAM map on Data Crystal. The reward is rightward progress, minus a penalty for each in-game clock tick and on
@@ -50,31 +52,75 @@ BOOT_LIMIT = 2000
 
 
 def x_position(ram: np.ndarray) -> int:
+    """Returns Mario's x-position in the level.
+
+    Args:
+        ram: The current RAM.
+
+    Returns:
+        The x-position in pixels from the start of the level.
+    """
     return int(ram[X_PAGE]) * 256 + int(ram[X_IN_PAGE])
 
 
 def timer(ram: np.ndarray) -> int:
+    """Returns the in-game clock.
+
+    Args:
+        ram: The current RAM.
+
+    Returns:
+        The time left, as shown on screen (e.g. 400 at the start of 1-1).
+    """
     hundreds, tens, ones = (int(ram[a]) for a in TIMER_DIGITS)
     return hundreds * 100 + tens * 10 + ones
 
 
 def is_dying(ram: np.ndarray) -> bool:
+    """Reports whether Mario is dead or dying, including falling into a pit.
+
+    Args:
+        ram: The current RAM.
+
+    Returns:
+        True if Mario is dead, dying or below the bottom of the screen.
+    """
     return int(ram[PLAYER_STATE]) in (STATE_DEAD, STATE_DYING) or int(ram[Y_VIEWPORT]) > 1
 
 
 def at_flagpole(ram: np.ndarray) -> bool:
+    """Reports whether Mario is sliding down the flagpole.
+
+    Args:
+        ram: The current RAM.
+
+    Returns:
+        True if Mario is on the flagpole.
+    """
     return int(ram[FLOAT_STATE]) == FLOAT_FLAGPOLE
 
 
 class SmbSpec(GameSpec):
-    # NOOP, R, R+A, R+B, R+A+B, A, L
+    """Super Mario Bros., one life per episode, starting in 1-1.
+
+    Attributes:
+        actions: NOOP, Right, Right+A, Right+B, Right+A+B, A and Left.
+    """
     actions = (0, RIGHT, RIGHT | A, RIGHT | B, RIGHT | A | B, A, LEFT)
 
     def boot(self, core: nes_py.NesCore) -> None:
-        """Power-on → title screen → press Start → wait until the level timer is set (400 in 1-1) and Mario is in
-        normal play.
+        """Runs from power-on through the title screen to the first frame of play in 1-1.
 
-        Start is only pressed while still on the title screen, because pressing it during play pauses the game.
+        Presses Start on the title screen, then waits until the level timer starts counting down (from 400 in 1-1)
+        and Mario is in normal play. Start is only pressed while still on the title screen, because pressing it
+        during play pauses the game.
+
+        Args:
+            core: The emulator core to drive.
+
+        Raises:
+            RuntimeError: If gameplay isn't reached within BOOT_LIMIT steps, e.g. because the ROM is not Super Mario
+                Bros.
         """
         core.step(0, frames=TITLE_WAIT)
         start_timer = None
@@ -92,6 +138,19 @@ class SmbSpec(GameSpec):
         raise RuntimeError("Super Mario Bros. did not reach gameplay; is this the right ROM?")
 
     def reward(self, prev_ram: np.ndarray, ram: np.ndarray) -> float:
+        """Computes the reward for one step.
+
+        The reward is the change in x-position (zero for teleports larger than MAX_X_STEP), minus the drop in the
+        in-game clock, plus DEATH_PENALTY on death and FLAG_BONUS on reaching the flagpole, clipped to
+        [-REWARD_CLIP, REWARD_CLIP].
+
+        Args:
+            prev_ram: The RAM before the step.
+            ram: The RAM after the step.
+
+        Returns:
+            The reward for the step.
+        """
         dx = x_position(ram) - x_position(prev_ram)
         if abs(dx) > MAX_X_STEP:
             dx = 0
@@ -102,11 +161,29 @@ class SmbSpec(GameSpec):
         return float(np.clip(dx + time_penalty + death + flag, -REWARD_CLIP, REWARD_CLIP))
 
     def terminated(self, ram: np.ndarray) -> bool:
+        """Reports whether the episode is over: Mario is dying or has reached the flagpole.
+
+        Args:
+            ram: The current RAM.
+
+        Returns:
+            True if the episode is over.
+        """
         return is_dying(ram) or at_flagpole(ram)
 
     def playing(self, ram: np.ndarray) -> bool:
-        """Normal play: not the title screen (whose attract demo also uses the normal player state), the lives
-        screen, the castle walk or a level's walk-in. Both checks are needed: the lives screen is in playing mode."""
+        """Reports whether the game is in normal play.
+
+        Normal play excludes the title screen (whose attract demo also uses the normal player state), the lives
+        screen, the castle walk and a level's walk-in. Both the game mode and player state checks are needed, since
+        the lives screen is in playing mode.
+
+        Args:
+            ram: The current RAM.
+
+        Returns:
+            True if the game is in normal play.
+        """
         return (
             int(ram[GAME_MODE]) == MODE_PLAYING
             and int(ram[PLAYER_STATE]) == STATE_NORMAL
@@ -114,10 +191,27 @@ class SmbSpec(GameSpec):
         )
 
     def paused(self, ram: np.ndarray) -> bool:
-        """Paused with Start: the game is frozen from the press until it unpauses."""
+        """Reports whether the game is paused with Start.
+
+        The game is frozen from the press until it unpauses.
+
+        Args:
+            ram: The current RAM.
+
+        Returns:
+            True if the game is paused.
+        """
         return bool(ram[PAUSE_STATUS] & 1)
 
     def info(self, ram: np.ndarray) -> dict:
+        """Returns Mario's position, the level, lives, time left and whether the flagpole was reached.
+
+        Args:
+            ram: The current RAM.
+
+        Returns:
+            A dict with keys "x", "world", "level" (both 1-based), "lives", "time" and "flag_get".
+        """
         return {
             "x": x_position(ram),
             "world": int(ram[WORLD]) + 1,

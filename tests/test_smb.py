@@ -1,7 +1,7 @@
-"""Super Mario Bros. spec.
+"""Tests for the Super Mario Bros. game spec.
 
-The reward/termination tests use synthetic RAM, so they always run. The rest play the real game and are skipped
-unless $SMB_ROM is set.
+The reward and termination tests use synthetic RAM, so they always run. The rest play the real game and are
+skipped unless $SMB_ROM is set.
 """
 
 import nes_py
@@ -18,6 +18,20 @@ NOOP = SmbSpec.actions.index(0)
 
 def make_ram(x=40, time=400, player_state=smb.STATE_NORMAL, float_state=0, y_viewport=1, game_mode=smb.MODE_PLAYING,
              pause_status=0):
+    """Makes a synthetic RAM image with the given game values and zeros elsewhere.
+
+    Args:
+        x: Mario's horizontal position in the level, in pixels.
+        time: The in-game timer, from 0 to 999.
+        player_state: The player state byte.
+        float_state: The float state byte, `smb.FLOAT_FLAGPOLE` while sliding down the flagpole.
+        y_viewport: The vertical viewport, above 1 when Mario has fallen into a pit.
+        game_mode: The game mode byte.
+        pause_status: The pause status byte.
+
+    Returns:
+        The 2 KB of CPU RAM as a uint8 array.
+    """
     ram = np.zeros(2048, dtype=np.uint8)
     ram[smb.GAME_MODE] = game_mode
     ram[smb.PAUSE_STATUS] = pause_status
@@ -34,28 +48,34 @@ def make_ram(x=40, time=400, player_state=smb.STATE_NORMAL, float_state=0, y_vie
 
 
 def test_ram_helpers():
+    """Reads the position and timer back from the RAM."""
     ram = make_ram(x=300, time=123)
     assert smb.x_position(ram) == 300
     assert smb.timer(ram) == 123
 
 
 def test_reward_rightward_progress():
+    """Rewards moving right by the pixels moved."""
     assert SmbSpec().reward(make_ram(x=40), make_ram(x=47)) == 7.0
 
 
 def test_reward_leftward_is_negative():
+    """Penalizes moving left by the pixels moved."""
     assert SmbSpec().reward(make_ram(x=47), make_ram(x=40)) == -7.0
 
 
 def test_reward_ignores_teleport():
+    """Gives no reward for a jump in position larger than `smb.MAX_X_STEP`, such as a pipe warp."""
     assert SmbSpec().reward(make_ram(x=40), make_ram(x=40 + smb.MAX_X_STEP + 1)) == 0.0
 
 
 def test_reward_time_penalty():
+    """Penalizes each tick of the timer by 1."""
     assert SmbSpec().reward(make_ram(time=400), make_ram(time=399)) == -1.0
 
 
 def test_reward_ignores_timer_reset():
+    """Gives no penalty when the timer resets for a new level or life."""
     assert SmbSpec().reward(make_ram(time=0), make_ram(time=400)) == 0.0
 
 
@@ -69,6 +89,11 @@ def test_reward_ignores_timer_reset():
     ids=["dying", "dead", "pit"],
 )
 def test_death(dying):
+    """Penalizes dying by the reward clip and ends the episode.
+
+    Args:
+        dying: The `make_ram` values for one way of dying.
+    """
     spec = SmbSpec()
     ram = make_ram(**dying)
     assert spec.reward(make_ram(), ram) == -smb.REWARD_CLIP
@@ -76,6 +101,7 @@ def test_death(dying):
 
 
 def test_flag_bonus_once_and_terminates():
+    """Rewards reaching the flagpole once, by the reward clip, and ends the episode."""
     spec = SmbSpec()
     on_pole = make_ram(float_state=smb.FLOAT_FLAGPOLE)
     assert spec.reward(make_ram(), on_pole) == smb.REWARD_CLIP
@@ -84,10 +110,12 @@ def test_flag_bonus_once_and_terminates():
 
 
 def test_normal_play_does_not_terminate():
+    """Keeps the episode going in normal play."""
     assert not SmbSpec().terminated(make_ram())
 
 
 def test_playing_in_normal_play():
+    """Reports the game as playable in normal play."""
     assert SmbSpec().playing(make_ram())
 
 
@@ -106,10 +134,16 @@ def test_playing_in_normal_play():
     ids=["title", "lives_screen", "castle_walk", "walk_in", "dying", "pit", "flagpole"],
 )
 def test_not_playing(ram):
+    """Reports the game as not playable outside normal play.
+
+    Args:
+        ram: The `make_ram` values for one state outside normal play.
+    """
     assert not SmbSpec().playing(make_ram(**ram))
 
 
 def test_info():
+    """Reports the position, world, level, lives, time and flag from the RAM."""
     info = SmbSpec().info(make_ram(x=300, time=250))
     assert info == {"x": 300, "world": 1, "level": 1, "lives": 0, "time": 250, "flag_get": False}
 
@@ -119,15 +153,26 @@ def test_info():
 
 @pytest.fixture
 def env(smb_rom):
+    """Makes a Super Mario Bros. environment with RAM observations.
+
+    Returns:
+        NesEnv: The environment, not yet reset.
+    """
     return NesEnv(smb_rom, game="smb", obs_type="ram")
 
 
 @pytest.fixture
 def pixel_env(smb_rom):
+    """Makes a Super Mario Bros. environment with pixel observations and RGB rendering.
+
+    Returns:
+        NesEnv: The environment, not yet reset.
+    """
     return NesEnv(smb_rom, game="smb", obs_type="pixels", render_mode="rgb_array")
 
 
 def test_boot_lands_in_1_1(env):
+    """Starts at the beginning of World 1-1 with a full timer and no flag."""
     _, info = env.reset()
     assert info["world"] == 1
     assert info["level"] == 1
@@ -137,6 +182,7 @@ def test_boot_lands_in_1_1(env):
 
 
 def test_reset_is_deterministic(env):
+    """Gives the same observation on every reset, even after steps have changed the game."""
     first, _ = env.reset()
     for _ in range(20):
         env.step(RUN_RIGHT)
@@ -145,7 +191,10 @@ def test_reset_is_deterministic(env):
 
 
 def test_reset_after_death_shows_start_of_1_1(pixel_env):
-    """After dying, the next episode's first observation and screen are the start of 1-1, not the death frame."""
+    """Shows the start of 1-1 on the reset after a death.
+
+    After dying, the next episode's first observation and screen are the start of 1-1, not the death frame.
+    """
     first_obs, _ = pixel_env.reset()
     first_frame = pixel_env.render()
     for _ in range(200):
@@ -159,6 +208,7 @@ def test_reset_after_death_shows_start_of_1_1(pixel_env):
 
 
 def test_running_right_earns_reward(env):
+    """Earns a positive reward and moves Mario right when running right."""
     env.reset()
     total = sum(env.step(RUN_RIGHT)[1] for _ in range(10))
     assert total > 0
@@ -166,6 +216,7 @@ def test_running_right_earns_reward(env):
 
 
 def test_standing_still_costs_time(env):
+    """Costs only the time penalty when standing still."""
     env.reset()
     rewards = [env.step(NOOP)[1] for _ in range(20)]
     assert min(rewards) == -1.0
@@ -173,6 +224,7 @@ def test_standing_still_costs_time(env):
 
 
 def test_running_into_first_goomba_ends_episode(env):
+    """Ends the episode with the death penalty when running into the first Goomba."""
     env.reset()
     for _ in range(200):
         _, reward, terminated, _, _ = env.step(RUN_RIGHT)
@@ -183,13 +235,17 @@ def test_running_into_first_goomba_ends_episode(env):
 
 
 def test_not_smb_rom_raises(nestest_rom):
+    """Raises on reset when the ROM never reaches gameplay."""
     with pytest.raises(RuntimeError, match="did not reach gameplay"):
         NesEnv(nestest_rom, game="smb").reset()
 
 
 def test_demo_segments_skip_lives_and_game_over_screens(smb_rom, tmp_path):
-    """Three deaths into the first Goomba, then game over: one segment per life, each starting in normal play,
-    and none on the lives screens or the title screen after game over."""
+    """Splits a demo into one segment per life, leaving out the lives and game over screens.
+
+    Three deaths into the first Goomba, then game over: one segment per life, each starting in normal play,
+    and none on the lives screens or the title screen after game over.
+    """
     core = nes_py.NesCore(str(smb_rom))
     SmbSpec().boot(core)
     start = core.save_state()
@@ -217,6 +273,7 @@ def test_demo_segments_skip_lives_and_game_over_screens(smb_rom, tmp_path):
 
 
 def test_paused():
+    """Reports the game as paused while paused and on the frame Start is pressed, but not while unpausing."""
     assert SmbSpec().paused(make_ram(pause_status=0x01))
     assert SmbSpec().paused(make_ram(pause_status=0x81))  # the frame Start is pressed
     assert not SmbSpec().paused(make_ram(pause_status=0x80))  # unpausing: the game runs again
@@ -224,7 +281,10 @@ def test_paused():
 
 
 def test_demo_skips_paused_windows(smb_rom, tmp_path):
-    """Run right, pause for 2 seconds, unpause, run on: the paused windows are skipped, in one segment."""
+    """Leaves the paused windows out of a demo without splitting it.
+
+    Run right, pause for 2 seconds, unpause, run on: the paused windows are skipped, in one segment.
+    """
     core = nes_py.NesCore(str(smb_rom))
     SmbSpec().boot(core)
     start = core.save_state()
