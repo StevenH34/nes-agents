@@ -40,3 +40,5 @@ packages = ["nes_gym"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Lets tests import the root-level scripts (bc_train.py, ...).
+pythonpath = ["."]
