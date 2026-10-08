@@ -180,6 +180,18 @@ def test_save_atomic_passes_open_file(tmp_path):
     assert seen == {"is_path": False, "writable": True, "closed": False}
 
 
+@pytest.mark.skipif(os.name != "posix", reason="permission bits only apply on Linux/macOS")
+def test_save_atomic_uses_umask_permissions(tmp_path):
+    """Checkpoints get the umask's normal permissions, like a plain save, not mkstemp's owner-only 0600."""
+    old_umask = os.umask(0o022)
+    try:
+        path = tmp_path / "step_1.zip"
+        save_atomic(FakeModel(), path)
+    finally:
+        os.umask(old_umask)
+    assert path.stat().st_mode & 0o777 == 0o644
+
+
 def test_latest_checkpoint_missing_dir(tmp_path):
     """A folder that doesn't exist has no latest checkpoint."""
     assert latest_checkpoint(tmp_path / "missing") is None

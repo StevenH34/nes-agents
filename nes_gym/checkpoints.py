@@ -11,8 +11,8 @@ process killed mid-save aren't cleaned up: another process could still be writin
 
 import os
 import re
-import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -70,6 +70,11 @@ def save_atomic(model: Saveable, path: str | os.PathLike) -> None:
     if saving fails (SB3 doesn't close a file it opened itself if saving fails partway). If anything fails, the temp
     file is deleted and an existing file at `path` is left untouched.
 
+    The temp file is created with open(..., "xb"), which never overwrites an existing file and gives the file the
+    normal permissions for the user's umask (usually 0644 on Linux/macOS), the same as a plain `model.save(path)`.
+    tempfile.mkstemp() would make it 0600, and os.replace() keeps that, so readers running as another user couldn't
+    load the checkpoint.
+
     Args:
         model: The model to save, e.g. an SB3 PPO model.
         path: Where to save it. Must end in ".zip". The parent folder is created if needed.
@@ -83,10 +88,11 @@ def save_atomic(model: Saveable, path: str | os.PathLike) -> None:
         raise ValueError(f"checkpoint path must end in .zip: {str(path)!r}")
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    tmp = Path(tmp_name)
+    tmp = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    # Opened outside the try: if creating it fails, there's nothing of ours to delete.
+    f = open(tmp, "xb")
     try:
-        with os.fdopen(fd, "wb") as f:
+        with f:
             model.save(f)
             f.flush()
             # Make sure the data is on disk before the rename, so a power cut can't leave an empty file at `path`.
