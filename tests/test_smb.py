@@ -16,9 +16,11 @@ RUN_RIGHT = SmbSpec.actions.index(smb.RIGHT | smb.B)
 NOOP = SmbSpec.actions.index(0)
 
 
-def make_ram(x=40, time=400, player_state=smb.STATE_NORMAL, float_state=0, y_viewport=1, game_mode=smb.MODE_PLAYING):
+def make_ram(x=40, time=400, player_state=smb.STATE_NORMAL, float_state=0, y_viewport=1, game_mode=smb.MODE_PLAYING,
+             pause_status=0):
     ram = np.zeros(2048, dtype=np.uint8)
     ram[smb.GAME_MODE] = game_mode
+    ram[smb.PAUSE_STATUS] = pause_status
     ram[smb.X_PAGE], ram[smb.X_IN_PAGE] = divmod(x, 256)
     for address, digit in zip(smb.TIMER_DIGITS, f"{time:03d}"):
         ram[address] = int(digit)
@@ -212,3 +214,28 @@ def test_demo_segments_skip_lives_and_game_over_screens(smb_rom, tmp_path):
     for ram in demo.observations[demo.episode_starts]:
         assert SmbSpec().playing(ram)
     assert all(int(ram[smb.GAME_MODE]) == smb.MODE_PLAYING for ram in demo.observations)
+
+
+def test_paused():
+    assert SmbSpec().paused(make_ram(pause_status=0x01))
+    assert SmbSpec().paused(make_ram(pause_status=0x81))  # the frame Start is pressed
+    assert not SmbSpec().paused(make_ram(pause_status=0x80))  # unpausing: the game runs again
+    assert not SmbSpec().paused(make_ram())
+
+
+def test_demo_skips_paused_windows(smb_rom, tmp_path):
+    """Run right, pause for 2 seconds, unpause, run on: the paused windows are skipped, in one segment."""
+    core = nes_py.NesCore(str(smb_rom))
+    SmbSpec().boot(core)
+    start = core.save_state()
+    buttons = np.repeat(
+        np.array([smb.RIGHT, smb.START, 0, smb.START, smb.RIGHT], dtype=np.uint8), [60, 4, 120, 4, 60]
+    )
+    path = tmp_path / "pause.nesdemo"
+    nes_py.save_recording(nes_py.Recording(core.rom_checksum(), start, buttons), str(path))
+
+    demo = demos.load_demo(path, nes_py.NesCore(str(smb_rom)), SmbSpec(), obs_type="ram")
+    assert demo.segment_count == 1
+    assert demo.paused >= 120 // 4
+    assert len(demo) + demo.paused == len(buttons) // 4 - 1
+    assert not any(SmbSpec().paused(ram) for ram in demo.observations)

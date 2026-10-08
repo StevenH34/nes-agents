@@ -24,18 +24,21 @@ LEFT_I = SmbSpec.actions.index(LEFT)
 class SmbActionsSpec(GameSpec):
     """SMB's actions on any ROM, with no boot. `terminated` is true right after the windows in `ends_after`, and
     `playing` is false right after the windows in `unplayable_after` (0-based, counting every window of the
-    recording; -1 means before the first window).
+    recording; -1 means before the first window). `paused` is true at the start of the windows in `paused_at`.
 
     The RAM is ignored. This relies on load_demo asking exactly one of playing() or terminated() before the first
-    window and after each window, so a shared call count gives the window.
+    window and after each window, so a shared call count gives the window. paused() is asked once before the first
+    window and after each window too, so it keeps its own count.
     """
 
     actions = SmbSpec.actions
 
-    def __init__(self, ends_after=(), unplayable_after=()):
+    def __init__(self, ends_after=(), unplayable_after=(), paused_at=()):
         self.ends_after = set(ends_after)
         self.unplayable_after = set(unplayable_after)
+        self.paused_at = set(paused_at)
         self.checks = 0
+        self.pause_checks = 0
 
     def boot(self, core):
         pass
@@ -48,6 +51,11 @@ class SmbActionsSpec(GameSpec):
 
     def playing(self, ram):
         return self._window() not in self.unplayable_after
+
+    def paused(self, ram):
+        window = self.pause_checks
+        self.pause_checks += 1
+        return window in self.paused_at
 
     def _window(self):
         window = self.checks - 1
@@ -194,6 +202,16 @@ def test_not_playing_inside_a_segment_is_ignored(tmp_path, nestest_rom):
     assert demo.segment_count == 1
 
 
+def test_paused_windows_skipped_without_ending_the_segment(tmp_path, nestest_rom):
+    """Paused at the start of windows 5-7 and 20: those pairs are skipped and counted, in one segment. A paused
+    window outside a segment (window 0 is never a pair) isn't counted."""
+    path = record(tmp_path / "a.nesdemo", nestest_rom, random_buttons(4 * 50))
+    demo = convert(path, nestest_rom, game=SmbActionsSpec(paused_at=(0, 5, 6, 7, 20)))
+    assert len(demo) == 45
+    assert demo.paused == 4
+    assert demo.segment_count == 1
+
+
 @pytest.mark.parametrize("frames", [0, 7])
 def test_too_short_for_a_pair(tmp_path, nestest_rom, frames):
     demo = convert(record(tmp_path / "a.nesdemo", nestest_rom, random_buttons(frames)), nestest_rom)
@@ -246,6 +264,6 @@ def test_cli_report(tmp_path, nestest_rom, monkeypatch, capsys):
 
     demos.main(["--rom", str(nestest_rom), "--game", "smb_actions", str(tmp_path)])
     out = capsys.readouterr().out
-    assert "4 pairs, 1 segments, 3 remapped (75.0%)" in out
-    assert "Total: 4 pairs from 1 recordings, 3 remapped (75.0%)" in out
+    assert "4 pairs, 1 segments, 3 remapped (75.0%), 0 paused windows skipped" in out
+    assert "Total: 4 pairs from 1 recordings, 3 remapped (75.0%), 0 paused windows skipped" in out
     assert out.index("B -> NOOP: 2") < out.index("L+A -> A: 1")
