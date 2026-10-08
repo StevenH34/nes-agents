@@ -35,6 +35,11 @@ class GameSpec(ABC):
         Defaults to not terminated, which suits games with no screens between lives."""
         return not self.terminated(ram)
 
+    def paused(self, ram: np.ndarray) -> bool:
+        """Whether the game is paused (frozen until the player unpauses). Demo conversion skips paused windows
+        without ending the segment, since the agent can't pause. Defaults to False."""
+        return False
+
     def info(self, ram: np.ndarray) -> dict:
         """Extra values for logging (e.g. position, level). Not used for training."""
         return {}
