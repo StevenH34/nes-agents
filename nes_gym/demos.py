@@ -25,6 +25,7 @@ and the game resumes the same episode on the same frozen screen. Their count is 
 import argparse
 from dataclasses import dataclass, field
 from collections import Counter
+from collections.abc import Iterable
 import os
 from pathlib import Path
 import numpy as np
@@ -186,16 +187,21 @@ def find_recordings(paths) -> list[Path]:
     return files
 
 def load_demos(
-    paths,
+    paths: str | os.PathLike | Iterable[str | os.PathLike],
     rom_path: str | os.PathLike,
     game: str = "smb",
     obs_type: str = "pixels",
     frame_skip: int = 4,
 ) -> list[Demo]:
-    """Convert recordings (files, or folders searched for *.nesdemo) made on `rom_path`. Raises ValueError on the
-    first recording made on a different ROM."""
+    """Convert recordings (files, or folders searched for *.nesdemo) made on `rom_path`. `paths` is one path or
+    several. Raises ValueError on the first recording made on a different ROM."""
     if game not in GAMES:
         raise ValueError(f"Invalid game: {game!r}. Expected one of {sorted(GAMES)}.")
+
+    # A single path, not its characters (a str is iterable) or a TypeError (a Path isn't).
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [paths]
+    paths = list(paths)
 
     files = find_recordings(paths)
     if not files:

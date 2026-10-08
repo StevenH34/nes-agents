@@ -247,6 +247,25 @@ def test_load_demos_searches_folders(tmp_path, nestest_rom):
     assert [demo.path for demo in loaded] == [str(tmp_path / "b.nesdemo"), str(tmp_path / "sub" / "a.nesdemo")]
 
 
+@pytest.mark.parametrize("as_type", [str, lambda p: p], ids=["str", "path"])
+def test_load_demos_single_path(tmp_path, nestest_rom, as_type):
+    """One folder or file, not wrapped in a list: a str isn't split into characters, and a Path isn't iterated."""
+    record(tmp_path / "a.nesdemo", nestest_rom, random_buttons(40))
+    record(tmp_path / "b.nesdemo", nestest_rom, random_buttons(40))
+
+    loaded = demos.load_demos(as_type(tmp_path), nestest_rom, game="null")
+    assert [demo.path for demo in loaded] == [str(tmp_path / "a.nesdemo"), str(tmp_path / "b.nesdemo")]
+    loaded = demos.load_demos(as_type(tmp_path / "a.nesdemo"), nestest_rom, game="null")
+    assert [demo.path for demo in loaded] == [str(tmp_path / "a.nesdemo")]
+
+
+def test_load_demos_generator_named_in_error(tmp_path, nestest_rom):
+    """A generator is read once, so the "no recordings" error must still name the folders it searched."""
+    with pytest.raises(ValueError, match="No .nesdemo files") as error:
+        demos.load_demos((p for p in [tmp_path]), nestest_rom, game="null")
+    assert "in []" not in str(error.value)
+
+
 def test_load_demos_no_recordings(tmp_path, nestest_rom):
     with pytest.raises(ValueError, match="No .nesdemo files"):
         demos.load_demos([tmp_path], nestest_rom, game="null")
