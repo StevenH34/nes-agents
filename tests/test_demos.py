@@ -22,14 +22,20 @@ LEFT_I = SmbSpec.actions.index(LEFT)
 
 
 class SmbActionsSpec(GameSpec):
-    """SMB's actions on any ROM: no boot, and `terminated` is true right after the windows listed in `ends_after`
-    (0-based, counting every window of the recording)."""
+    """SMB's actions on any ROM, with no boot. `terminated` is true right after the windows in `ends_after`, and
+    `playing` is false right after the windows in `unplayable_after` (0-based, counting every window of the
+    recording; -1 means before the first window).
+
+    The RAM is ignored. This relies on load_demo asking exactly one of playing() or terminated() before the first
+    window and after each window, so a shared call count gives the window.
+    """
 
     actions = SmbSpec.actions
 
-    def __init__(self, ends_after=()):
+    def __init__(self, ends_after=(), unplayable_after=()):
         self.ends_after = set(ends_after)
-        self.windows = 0
+        self.unplayable_after = set(unplayable_after)
+        self.checks = 0
 
     def boot(self, core):
         pass
@@ -38,9 +44,15 @@ class SmbActionsSpec(GameSpec):
         return 0.0
 
     def terminated(self, ram):
-        ended = self.windows in self.ends_after
-        self.windows += 1
-        return ended
+        return self._window() in self.ends_after
+
+    def playing(self, ram):
+        return self._window() not in self.unplayable_after
+
+    def _window(self):
+        window = self.checks - 1
+        self.checks += 1
+        return window
 
 
 def start_state(rom):
@@ -147,13 +159,39 @@ def test_actions_and_remaps(tmp_path, nestest_rom):
 
 
 def test_segments(tmp_path, nestest_rom):
-    """Terminated after windows 9, 10 and 29: windows 10, 11 and 30 are skipped, and segments start at the first
-    pair (window 1) and at windows 12 and 31."""
+    """Terminated after windows 9 and 29, and not yet playable after window 10: windows 10, 11 and 30 are skipped,
+    and segments start at the first pair (window 1) and at windows 12 and 31."""
     path = record(tmp_path / "a.nesdemo", nestest_rom, random_buttons(4 * 50))
-    demo = convert(path, nestest_rom, game=SmbActionsSpec(ends_after=(9, 10, 29)))
+    demo = convert(path, nestest_rom, game=SmbActionsSpec(ends_after=(9, 29), unplayable_after=(10,)))
     assert len(demo) == 46
     np.testing.assert_array_equal(np.flatnonzero(demo.episode_starts), [0, 9, 27])
     assert demo.segment_count == 3
+
+
+def test_recording_starting_outside_play(tmp_path, nestest_rom):
+    """Not playable at the start or after windows 0 and 1, so the first pair is window 3."""
+    path = record(tmp_path / "a.nesdemo", nestest_rom, random_buttons(4 * 50))
+    demo = convert(path, nestest_rom, game=SmbActionsSpec(unplayable_after=(-1, 0, 1)))
+    assert len(demo) == 47
+    assert demo.segment_count == 1
+
+
+def test_not_playing_inside_a_segment_is_ignored(tmp_path, nestest_rom):
+    """Inside a segment only `terminated` ends it, so states like pipes or power-ups don't split it."""
+
+    class PlayableOnlyAtStart(SmbActionsSpec):
+        def __init__(self):
+            super().__init__()
+            self.asked = 0
+
+        def playing(self, ram):
+            self.asked += 1
+            return self.asked == 1
+
+    path = record(tmp_path / "a.nesdemo", nestest_rom, random_buttons(4 * 50))
+    demo = convert(path, nestest_rom, game=PlayableOnlyAtStart())
+    assert len(demo) == 49
+    assert demo.segment_count == 1
 
 
 @pytest.mark.parametrize("frames", [0, 7])

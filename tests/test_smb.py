@@ -4,10 +4,11 @@ The reward/termination tests use synthetic RAM, so they always run. The rest pla
 unless $SMB_ROM is set.
 """
 
+import nes_py
 import numpy as np
 import pytest
 
-from nes_gym import NesEnv
+from nes_gym import NesEnv, demos
 from nes_gym.games import smb
 from nes_gym.games.smb import SmbSpec
 
@@ -15,8 +16,9 @@ RUN_RIGHT = SmbSpec.actions.index(smb.RIGHT | smb.B)
 NOOP = SmbSpec.actions.index(0)
 
 
-def make_ram(x=40, time=400, player_state=smb.STATE_NORMAL, float_state=0, y_viewport=1):
+def make_ram(x=40, time=400, player_state=smb.STATE_NORMAL, float_state=0, y_viewport=1, game_mode=smb.MODE_PLAYING):
     ram = np.zeros(2048, dtype=np.uint8)
+    ram[smb.GAME_MODE] = game_mode
     ram[smb.X_PAGE], ram[smb.X_IN_PAGE] = divmod(x, 256)
     for address, digit in zip(smb.TIMER_DIGITS, f"{time:03d}"):
         ram[address] = int(digit)
@@ -81,6 +83,28 @@ def test_flag_bonus_once_and_terminates():
 
 def test_normal_play_does_not_terminate():
     assert not SmbSpec().terminated(make_ram())
+
+
+def test_playing_in_normal_play():
+    assert SmbSpec().playing(make_ram())
+
+
+@pytest.mark.parametrize(
+    "ram",
+    [
+        # The title screen's attract demo uses the normal player state.
+        {"game_mode": smb.MODE_TITLE},
+        {"player_state": 0x00},  # lives screen
+        {"player_state": 0x05},  # castle walk
+        {"player_state": 0x07},  # a level's walk-in
+        {"player_state": smb.STATE_DYING},
+        {"y_viewport": 2},
+        {"float_state": smb.FLOAT_FLAGPOLE},
+    ],
+    ids=["title", "lives_screen", "castle_walk", "walk_in", "dying", "pit", "flagpole"],
+)
+def test_not_playing(ram):
+    assert not SmbSpec().playing(make_ram(**ram))
 
 
 def test_info():
@@ -159,3 +183,32 @@ def test_running_into_first_goomba_ends_episode(env):
 def test_not_smb_rom_raises(nestest_rom):
     with pytest.raises(RuntimeError, match="did not reach gameplay"):
         NesEnv(nestest_rom, game="smb").reset()
+
+
+def test_demo_segments_skip_lives_and_game_over_screens(smb_rom, tmp_path):
+    """Three deaths into the first Goomba, then game over: one segment per life, each starting in normal play,
+    and none on the lives screens or the title screen after game over."""
+    core = nes_py.NesCore(str(smb_rom))
+    SmbSpec().boot(core)
+    start = core.save_state()
+    buttons = []
+    for _ in range(3):
+        for _ in range(2000):
+            core.step(smb.RIGHT)
+            buttons.append(smb.RIGHT)
+            if smb.is_dying(core.ram()):
+                break
+        for _ in range(400):
+            core.step(0)
+            buttons.append(0)
+    for _ in range(400):
+        core.step(0)
+        buttons.append(0)
+    path = tmp_path / "deaths.nesdemo"
+    nes_py.save_recording(nes_py.Recording(core.rom_checksum(), start, np.array(buttons, dtype=np.uint8)), str(path))
+
+    demo = demos.load_demo(path, nes_py.NesCore(str(smb_rom)), SmbSpec(), obs_type="ram")
+    assert demo.segment_count == 3
+    for ram in demo.observations[demo.episode_starts]:
+        assert SmbSpec().playing(ram)
+    assert all(int(ram[smb.GAME_MODE]) == smb.MODE_PLAYING for ram in demo.observations)
