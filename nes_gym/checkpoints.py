@@ -159,12 +159,9 @@ def latest_checkpoint(directory: str | os.PathLike) -> Path | None:
         entries = list(Path(directory).iterdir())
     except (FileNotFoundError, NotADirectoryError):
         return None
-    best: tuple[int, Path] | None = None
-    for entry in entries:
-        match = CHECKPOINT_RE.fullmatch(entry.name)
-        if match is None or not entry.is_file():
-            continue
-        step = int(match.group(1))
-        if best is None or step > best[0]:
-            best = (step, entry)
-    return None if best is None else best[1]
+    # The name is checked first, so only checkpoint-named entries cost a filesystem call in is_file().
+    return max(
+        (p for p in entries if CHECKPOINT_RE.fullmatch(p.name) and p.is_file()),
+        key=checkpoint_step,
+        default=None,
+    )
