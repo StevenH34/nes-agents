@@ -23,13 +23,14 @@ and the game resumes the same episode on the same frozen screen. Their count is 
 """
 
 import argparse
-from dataclasses import dataclass, field
+import os
 from collections import Counter
 from collections.abc import Iterable
-import os
+from dataclasses import dataclass, field
 from pathlib import Path
-import numpy as np
+
 import nes_py
+import numpy as np
 
 from nes_gym.env import OBS_TYPES, RAM_SIZE
 from nes_gym.games import GAMES
@@ -48,9 +49,11 @@ BUTTON_NAMES = (
     (nes_py.BUTTON_START, "Start"),
 )
 
+
 def mask_name(mask: int) -> str:
     """Readable name for a button mask, e.g. "R+A"; "NOOP" for no buttons."""
     return "+".join(name for bit, name in BUTTON_NAMES if mask & bit) or "NOOP"
+
 
 def nearest_action(mask: int, actions: tuple[int, ...]) -> int:
     """Index of the action with the fewest buttons differing from `mask`. Ties go to the earlier action.
@@ -61,6 +64,7 @@ def nearest_action(mask: int, actions: tuple[int, ...]) -> int:
     """
     return min(range(len(actions)), key=lambda i: ((mask ^ actions[i]).bit_count(), i))
 
+
 def window_mask(masks: np.ndarray) -> int:
     """The most common mask in one window. Ties go to the mask held last: that's the player's current intent, and
     it carries on into the next window."""
@@ -69,12 +73,16 @@ def window_mask(masks: np.ndarray) -> int:
     best = max(counts.values())
     return next(m for m in reversed(seq) if counts[m] == best)
 
+
 def _observe(core: nes_py.NesCore, obs_type: str) -> np.ndarray:
     if obs_type == "pixels":
         return core.obs84()[..., np.newaxis]
     return core.ram()
 
+
 @dataclass
+
+
 class Demo:
     """The pairs from one recording."""
 
@@ -136,10 +144,10 @@ def load_demo(
 
     # A trailing window shorter than frame_skip will be ignored.
     for k in range(len(buttons) // frame_skip):
-        window  = buttons[k * frame_skip : (k + 1) * frame_skip]
+        window = buttons[k * frame_skip : (k + 1) * frame_skip]
         if k > 0 and in_segment and paused:
             paused_windows += 1
-        # Window 0 has no valid observation
+        # Window 0 has no valid observation.
         elif k > 0 and in_segment:
             mask = window_mask(window)
             action = nearest[mask]
@@ -150,7 +158,7 @@ def load_demo(
             episode_starts.append(new_segment)
             new_segment = False
 
-        # Replay the player's real inputs
+        # Replay the player's real inputs.
         for mask in window:
             core.step(int(mask))
 
@@ -176,6 +184,7 @@ def load_demo(
         paused=paused_windows,
     )
 
+
 def find_recordings(paths) -> list[Path]:
     """Files as given, plus every *.nesdemo under each folder, sorted within the folder."""
     files = []
@@ -185,6 +194,7 @@ def find_recordings(paths) -> list[Path]:
         else:
             files.append(p)
     return files
+
 
 def load_demos(
     paths: str | os.PathLike | Iterable[str | os.PathLike],
@@ -212,6 +222,7 @@ def load_demos(
 
     return [load_demo(f, core, spec, obs_type=obs_type, frame_skip=frame_skip) for f in files]
 
+
 def remap_report(demos: list[Demo], actions: tuple[int, ...], top: int = 10) -> str:
     """Per-recording pair, segment and remap counts, then the most common remaps across all of them."""
     lines = []
@@ -235,7 +246,7 @@ def remap_report(demos: list[Demo], actions: tuple[int, ...], top: int = 10) -> 
         f"{total_paused} paused windows skipped"
     )
     for (mask, action), count in remapped.most_common(top):
-        lines.append(f" {mask_name(mask)} -> {mask_name(actions[action])}: {count}")
+        lines.append(f"  {mask_name(mask)} -> {mask_name(actions[action])}: {count}")
 
     return "\n".join(lines)
 
@@ -251,6 +262,7 @@ def main(argv=None) -> None:
 
     demos = load_demos(args.paths, args.rom, game=args.game, obs_type=args.obs, frame_skip=args.frame_skip)
     print(remap_report(demos, GAMES[args.game].actions))
+
 
 if __name__ == "__main__":
     main()
