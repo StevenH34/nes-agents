@@ -29,6 +29,17 @@ class GameSpec(ABC):
     def terminated(self, ram: np.ndarray) -> bool:
         """Whether the episode is over (e.g. a life was lost or the level was finished)."""
 
+    def playing(self, ram: np.ndarray) -> bool:
+        """Whether the game is in normal play, where a NesEnv episode could be running. Demo conversion starts a new
+        segment only where this is true: at the start of a recording, and after the game reports `terminated`.
+        Defaults to not terminated, which suits games with no screens between lives."""
+        return not self.terminated(ram)
+
+    def paused(self, ram: np.ndarray) -> bool:
+        """Whether the game is paused (frozen until the player unpauses). Demo conversion skips paused windows
+        without ending the segment, since the agent can't pause. Defaults to False."""
+        return False
+
     def info(self, ram: np.ndarray) -> dict:
         """Extra values for logging (e.g. position, level). Not used for training."""
         return {}
