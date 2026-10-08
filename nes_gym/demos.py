@@ -17,6 +17,9 @@ segment starts there. A recording that starts outside play (e.g. on the title sc
 until play begins. Inside a segment only `terminated` is checked, so states NesEnv episodes also pass through
 (pipes, power-ups) stay in the segment. `episode_starts` marks the first pair of each segment, so frame stacking
 for training can restart there, as SB3's VecFrameStack does after a reset.
+
+Windows that start while the game is `paused` are skipped too, but don't end the segment: the agent can't pause,
+and the game resumes the same episode on the same frozen screen. Their count is reported.
 """
 
 import argparse
@@ -80,6 +83,7 @@ class Demo:
     episode_starts: np.ndarray  # (T,) bool, True on the first pair of each segment
     # (window mask, action index) -> number of windows whose mask wasn't one of the actions and was remapped.
     remapped: Counter = field(default_factory=Counter)
+    paused: int = 0  # windows skipped because the game was paused
 
     def __len__(self) -> int:
         return len(self.actions)
@@ -125,12 +129,17 @@ def load_demo(
     # Inside a segment: from the first playable window until the game reports terminated.
     in_segment = game.playing(core.ram())
     new_segment = True
+    # Whether the game is paused at the start of the current window, i.e. on its observation.
+    paused = game.paused(core.ram())
+    paused_windows = 0
 
     # A trailing window shorter than frame_skip will be ignored.
     for k in range(len(buttons) // frame_skip):
         window  = buttons[k * frame_skip : (k + 1) * frame_skip]
+        if k > 0 and in_segment and paused:
+            paused_windows += 1
         # Window 0 has no valid observation
-        if k > 0 and in_segment:
+        elif k > 0 and in_segment:
             mask = window_mask(window)
             action = nearest[mask]
             if game.actions[action] != mask:
@@ -145,6 +154,7 @@ def load_demo(
             core.step(int(mask))
 
         ram = core.ram()
+        paused = game.paused(ram)
         if in_segment:
             in_segment = not game.terminated(ram)
         elif game.playing(ram):
@@ -162,6 +172,7 @@ def load_demo(
         actions=np.array(actions, dtype=np.int64),
         episode_starts=np.array(episode_starts, dtype=bool),
         remapped=remapped,
+        paused=paused_windows,
     )
 
 def find_recordings(paths) -> list[Path]:
@@ -198,21 +209,25 @@ def load_demos(
 def remap_report(demos: list[Demo], actions: tuple[int, ...], top: int = 10) -> str:
     """Per-recording pair, segment and remap counts, then the most common remaps across all of them."""
     lines = []
-    total_pairs = total_remaps = 0
+    total_pairs = total_remaps = total_paused = 0
     remapped = Counter()
 
     for demo in demos:
         rate = demo.remap_count / len(demo) if len(demo) else 0.0
         lines.append(
             f"{demo.path}: {len(demo)} pairs, {demo.segment_count} segments, "
-            f"{demo.remap_count} remapped ({rate:.1%})"
+            f"{demo.remap_count} remapped ({rate:.1%}), {demo.paused} paused windows skipped"
         )
         total_pairs += len(demo)
         total_remaps += demo.remap_count
+        total_paused += demo.paused
         remapped.update(demo.remapped)
 
     rate = total_remaps / total_pairs if total_pairs else 0.0
-    lines.append(f"Total: {total_pairs} pairs from {len(demos)} recordings, {total_remaps} remapped ({rate:.1%})")
+    lines.append(
+        f"Total: {total_pairs} pairs from {len(demos)} recordings, {total_remaps} remapped ({rate:.1%}), "
+        f"{total_paused} paused windows skipped"
+    )
     for (mask, action), count in remapped.most_common(top):
         lines.append(f" {mask_name(mask)} -> {mask_name(actions[action])}: {count}")
 
