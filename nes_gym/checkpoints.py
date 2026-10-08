@@ -9,6 +9,7 @@ Temp files start with "." and end in ".tmp", so latest_checkpoint() never picks 
 process killed mid-save aren't cleaned up: another process could still be writing one.
 """
 
+import operator
 import os
 import re
 import time
@@ -33,13 +34,26 @@ class Saveable(Protocol):
 def checkpoint_path(directory: str | os.PathLike, step: int) -> Path:
     """Returns the path of the checkpoint for a step.
 
+    Only steps that checkpoint_step() and latest_checkpoint() can read back are accepted, so a bad step fails here
+    instead of silently saving a checkpoint `play.py --follow` never finds.
+
     Args:
         directory: The run's checkpoint folder, e.g. "checkpoints/<run>".
-        step: The gradient step or timestep.
+        step: The gradient step or timestep: a non-negative integer, e.g. an int or np.int64.
 
     Returns:
         `directory/step_<step>.zip`.
+
+    Raises:
+        TypeError: `step` isn't an integer, or is a bool (f"{True}" would give "step_True.zip").
+        ValueError: `step` is negative.
     """
+    if isinstance(step, bool):
+        raise TypeError(f"step must be an integer, not a bool: {step!r}")
+    # operator.index() accepts Python and numpy integers and raises TypeError for floats, strings and None.
+    step = operator.index(step)
+    if step < 0:
+        raise ValueError(f"step must be >= 0: {step}")
     return Path(directory) / f"step_{step}.zip"
 
 

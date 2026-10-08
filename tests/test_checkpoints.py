@@ -5,6 +5,7 @@ Fake models stand in for SB3 models, so no SB3, ROM or GPU is needed.
 
 import os
 
+import numpy as np
 import pytest
 
 from nes_gym import checkpoints
@@ -86,6 +87,28 @@ def test_checkpoint_path(tmp_path):
     path = checkpoint_path(tmp_path, 42)
     assert path == tmp_path / "step_42.zip"
     assert checkpoint_step(path) == 42
+
+
+def test_checkpoint_path_step_zero(tmp_path):
+    """Step 0 is a valid checkpoint."""
+    path = checkpoint_path(tmp_path, 0)
+    assert path == tmp_path / "step_0.zip"
+    assert checkpoint_step(path) == 0
+
+
+def test_checkpoint_path_accepts_numpy_ints(tmp_path):
+    """numpy integers are accepted and named like Python ints."""
+    assert checkpoint_path(tmp_path, np.int64(5)) == tmp_path / "step_5.zip"
+
+
+@pytest.mark.parametrize(
+    "step, error",
+    [(1.5, TypeError), (1.0, TypeError), ("5", TypeError), (None, TypeError), (True, TypeError), (-1, ValueError)],
+)
+def test_checkpoint_path_rejects_bad_steps(tmp_path, step, error):
+    """checkpoint_path raises for steps that checkpoint_step and latest_checkpoint couldn't read back."""
+    with pytest.raises(error):
+        checkpoint_path(tmp_path, step)
 
 
 @pytest.mark.parametrize(
