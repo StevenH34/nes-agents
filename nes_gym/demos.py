@@ -81,8 +81,6 @@ def _observe(core: nes_py.NesCore, obs_type: str) -> np.ndarray:
 
 
 @dataclass
-
-
 class Demo:
     """The pairs from one recording."""
 
@@ -185,7 +183,7 @@ def load_demo(
     )
 
 
-def find_recordings(paths) -> list[Path]:
+def find_recordings(paths: Iterable[str | os.PathLike]) -> list[Path]:
     """Files as given, plus every *.nesdemo under each folder, sorted within the folder."""
     files = []
     for p in map(Path, paths):
