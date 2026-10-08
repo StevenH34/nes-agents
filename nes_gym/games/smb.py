@@ -34,6 +34,7 @@ STATE_NORMAL = 0x08
 STATE_DYING = 0x0B
 FLOAT_FLAGPOLE = 0x03
 MODE_TITLE = 0
+MODE_PLAYING = 1
 
 # A jump in x larger than this in one step is a teleport (pipe, level change), not movement, so it earns nothing.
 MAX_X_STEP = 50
@@ -84,7 +85,7 @@ class SmbSpec(GameSpec):
                 continue
             if start_timer is None:
                 start_timer = timer(ram)
-            elif timer(ram) != start_timer and int(ram[PLAYER_STATE]) == STATE_NORMAL:
+            elif timer(ram) != start_timer and self.playing(ram):
                 return
             core.step(0)
         raise RuntimeError("Super Mario Bros. did not reach gameplay; is this the right ROM?")
@@ -101,6 +102,15 @@ class SmbSpec(GameSpec):
 
     def terminated(self, ram: np.ndarray) -> bool:
         return is_dying(ram) or at_flagpole(ram)
+
+    def playing(self, ram: np.ndarray) -> bool:
+        """Normal play: not the title screen (whose attract demo also uses the normal player state), the lives
+        screen, the castle walk or a level's walk-in. Both checks are needed: the lives screen is in playing mode."""
+        return (
+            int(ram[GAME_MODE]) == MODE_PLAYING
+            and int(ram[PLAYER_STATE]) == STATE_NORMAL
+            and not self.terminated(ram)
+        )
 
     def info(self, ram: np.ndarray) -> dict:
         return {
