@@ -220,6 +220,24 @@ def test_latest_checkpoint_missing_dir(tmp_path):
     assert latest_checkpoint(tmp_path / "missing") is None
 
 
+def test_latest_checkpoint_dir_vanishes(tmp_path, monkeypatch):
+    """A folder deleted just before it's listed has no latest checkpoint, rather than raising."""
+    checkpoint_path(tmp_path, 1).write_bytes(b"")
+
+    def iterdir(self):
+        raise FileNotFoundError(self)
+
+    monkeypatch.setattr(checkpoints.Path, "iterdir", iterdir)
+    assert latest_checkpoint(tmp_path) is None
+
+
+def test_latest_checkpoint_path_is_file(tmp_path):
+    """A path that points to a file has no latest checkpoint."""
+    path = tmp_path / "notes.txt"
+    path.write_bytes(b"")
+    assert latest_checkpoint(path) is None
+
+
 def test_latest_checkpoint_empty_dir(tmp_path):
     """An empty folder has no latest checkpoint."""
     assert latest_checkpoint(tmp_path) is None

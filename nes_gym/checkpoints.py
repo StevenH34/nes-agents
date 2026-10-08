@@ -143,17 +143,24 @@ def latest_checkpoint(directory: str | os.PathLike) -> Path | None:
     Only regular files named exactly `step_<n>.zip` count, so temp files and anything else in the folder are ignored.
     Steps are compared as numbers: step_1000 is newer than step_900.
 
+    The folder can be deleted at any moment (e.g. a run restarted while `play.py --follow` polls it), so a missing
+    folder is handled by catching the error from listing it, not by checking first. A file deleted after the listing
+    can still be returned: callers loading it must handle FileNotFoundError.
+
     Args:
         directory: The run's checkpoint folder.
 
     Returns:
-        The path of the checkpoint with the highest step, or None if the folder doesn't exist or has no checkpoints.
+        The path of the checkpoint with the highest step, or None if the folder doesn't exist, isn't a folder or has
+        no checkpoints.
     """
-    directory = Path(directory)
-    if not directory.is_dir():
+    try:
+        # list() reads the folder here, inside the try; iterdir() alone only reads it once iteration starts.
+        entries = list(Path(directory).iterdir())
+    except (FileNotFoundError, NotADirectoryError):
         return None
     best: tuple[int, Path] | None = None
-    for entry in directory.iterdir():
+    for entry in entries:
         match = CHECKPOINT_RE.fullmatch(entry.name)
         if match is None or not entry.is_file():
             continue
