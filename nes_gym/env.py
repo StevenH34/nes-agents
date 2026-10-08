@@ -16,13 +16,32 @@ RAM_SIZE = 2048
 class NesEnv(gym.Env):
     """One NES game as a Gymnasium environment.
 
-    Game-specific behaviour comes from the GameSpec registered under `game`. Observations are an (84, 84, 1) 
-    uint8 grayscale frame (`obs_type="pixels"`, made by the emulator's shared C++ preprocessing) or the 2 KB 
-    of CPU RAM (`obs_type="ram"`). Each step holds the action's buttons for `frame_skip` frames. Frame stacking 
-    is left to SB3's VecFrameStack.
+    Game-specific behaviour comes from the GameSpec registered under `game`. Observations are an (84, 84, 1) uint8
+    grayscale frame (`obs_type="pixels"`, made by the emulator's shared C++ preprocessing) or the 2 KB of CPU RAM
+    (`obs_type="ram"`). Each step holds the action's buttons for `frame_skip` frames. Frame stacking is left to SB3's
+    VecFrameStack.
 
-    The first reset() boots the game and caches a save state at the start of gameplay; later resets reload it. 
-    The emulator is deterministic, so every episode starts from the same frame and `seed` has no effect on it.
+    The first reset() boots the game and caches a save state at the start of gameplay; later resets reload it. The
+    emulator is deterministic, so every episode starts from the same frame and `seed` has no effect on it.
+
+    Args:
+        rom_path: Path to the game's .nes ROM file.
+        game: The key of the game's GameSpec in nes_gym.games.GAMES.
+        obs_type: "pixels" for the (84, 84, 1) grayscale frame, or "ram" for the 2 KB of CPU RAM.
+        frame_skip: The number of frames each action's buttons are held for.
+        render_mode: "rgb_array" to have render() return the full frame, or None to disable rendering.
+
+    Raises:
+        ValueError: If `game`, `obs_type` or `render_mode` isn't supported, or `frame_skip` is less than 1.
+
+    Attributes:
+        core: The emulator core running the ROM.
+        game: The GameSpec instance for the game being played.
+        obs_type: The observation type, "pixels" or "ram".
+        frame_skip: The number of frames each step advances.
+        render_mode: The render mode, "rgb_array" or None.
+        action_space: A Discrete space indexing into `game.actions`.
+        observation_space: A uint8 Box shaped by `obs_type`.
     """
 
     metadata = {"render_modes": ["rgb_array"], "render_fps": 60}
@@ -59,15 +78,26 @@ class NesEnv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=255, shape=shape, dtype=np.uint8)
 
         self._start_state: bytes | None = None
-        # The emulator's save state doesn't include the drawn image, so after load_state() frame() 
-        # and obs84() still show the previous episode until the next frame is drawn. The start images are
-        # cached alongside the start state and returned until the first step.
+        # The emulator's save state doesn't include the drawn image, so after load_state() frame() and obs84() still
+        # show the previous episode until the next frame is drawn. The start images are cached alongside the start
+        # state and returned until the first step.
         self._start_frame: np.ndarray | None = None
         self._start_obs84: np.ndarray | None = None
         self._at_start = False
         self._prev_ram: np.ndarray | None = None
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
+        """Starts a new episode from the first frame of gameplay.
+
+        The first call boots the game and caches a save state; later calls reload it.
+
+        Args:
+            seed: Seeds the environment's np_random. Has no effect on the emulator, which is deterministic.
+            options: Unused; accepted for Gymnasium compatibility.
+
+        Returns:
+            A tuple of the first observation and the game's info dict.
+        """
         super().reset(seed=seed)
         if self._start_state is None:
             self.game.boot(self.core)
@@ -83,6 +113,18 @@ class NesEnv(gym.Env):
         return self._observe(ram), self.game.info(ram)
 
     def step(self, action):
+        """Holds the action's buttons for `frame_skip` frames.
+
+        Args:
+            action: An index into the game's actions.
+
+        Returns:
+            A tuple of (observation, reward, terminated, truncated, info). `truncated` is always False; episode time
+            limits come from Gymnasium's TimeLimit wrapper.
+
+        Raises:
+            RuntimeError: If reset() hasn't been called yet.
+        """
         if self._prev_ram is None:
             raise RuntimeError("call reset() before step()")
 
@@ -92,15 +134,27 @@ class NesEnv(gym.Env):
         reward = float(self.game.reward(self._prev_ram, ram))
         terminated = bool(self.game.terminated(ram))
         self._prev_ram = ram
-        # truncated is always False; episode time limits come from gymnasium's TimeLimit wrapper.
         return self._observe(ram), reward, terminated, False, self.game.info(ram)
 
     def render(self):
+        """Returns the current full-size frame.
+
+        Returns:
+            The frame as an RGB uint8 array if `render_mode` is "rgb_array", otherwise None.
+        """
         if self.render_mode == "rgb_array":
             return self._start_frame.copy() if self._at_start else self.core.frame()
         return None
 
     def _observe(self, ram: np.ndarray) -> np.ndarray:
+        """Builds the observation for the current state.
+
+        Args:
+            ram: The current RAM.
+
+        Returns:
+            The (84, 84, 1) grayscale frame if `obs_type` is "pixels", otherwise a copy of `ram`.
+        """
         if self.obs_type == "pixels":
             obs = self._start_obs84.copy() if self._at_start else self.core.obs84()
             return obs[..., np.newaxis]
