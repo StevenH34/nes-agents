@@ -27,6 +27,7 @@ LEVEL = 0x075C  # 0-based
 LIVES = 0x075A
 WORLD = 0x075F  # 0-based
 GAME_MODE = 0x0770  # 0 = title screen / demo, 1 = playing
+PAUSE_STATUS = 0x0776  # bit 0 set while paused; 0x81 on pausing, 0x01 paused, 0x80 unpausing
 TIMER_DIGITS = (0x07F8, 0x07F9, 0x07FA)  # one decimal digit per byte, hundreds first
 
 STATE_DEAD = 0x06
@@ -111,6 +112,10 @@ class SmbSpec(GameSpec):
             and int(ram[PLAYER_STATE]) == STATE_NORMAL
             and not self.terminated(ram)
         )
+
+    def paused(self, ram: np.ndarray) -> bool:
+        """Paused with Start: the game is frozen from the press until it unpauses."""
+        return bool(ram[PAUSE_STATUS] & 1)
 
     def info(self, ram: np.ndarray) -> dict:
         return {
