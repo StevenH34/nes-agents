@@ -11,9 +11,12 @@ The first window of each recording is dropped: a save state doesn't include the 
 load_state() the screen still shows whatever was drawn before (the same reason NesEnv caches its start images).
 
 Recordings run on through deaths and respawns, but NesEnv ends the episode there. Pairs are therefore split into
-segments: a segment ends on the window where the game reports `terminated`, windows are skipped while it stays
-terminated, and a new segment starts once it clears. `episode_starts` marks the first pair of each segment, so
-frame stacking for training can restart there, as SB3's VecFrameStack does after a reset.
+segments: a segment ends on the window where the game reports `terminated`. Windows are then skipped until the
+game reports `playing` again (for SMB: past the lives screen, castle walk and a level's walk-in), and a new
+segment starts there. A recording that starts outside play (e.g. on the title screen) is skipped the same way
+until play begins. Inside a segment only `terminated` is checked, so states NesEnv episodes also pass through
+(pipes, power-ups) stay in the segment. `episode_starts` marks the first pair of each segment, so frame stacking
+for training can restart there, as SB3's VecFrameStack does after a reset.
 """
 
 import argparse
@@ -119,14 +122,15 @@ def load_demo(
     buttons = recording.buttons
     observations, actions, episode_starts = [], [], []
     remapped = Counter()
+    # Inside a segment: from the first playable window until the game reports terminated.
+    in_segment = game.playing(core.ram())
     new_segment = True
-    playing = True
 
     # A trailing window shorter than frame_skip will be ignored.
     for k in range(len(buttons) // frame_skip):
         window  = buttons[k * frame_skip : (k + 1) * frame_skip]
         # Window 0 has no valid observation
-        if k > 0 and playing:
+        if k > 0 and in_segment:
             mask = window_mask(window)
             action = nearest[mask]
             if game.actions[action] != mask:
@@ -140,8 +144,11 @@ def load_demo(
         for mask in window:
             core.step(int(mask))
 
-        playing = not game.terminated(core.ram())
-        if not playing:
+        ram = core.ram()
+        if in_segment:
+            in_segment = not game.terminated(ram)
+        elif game.playing(ram):
+            in_segment = True
             new_segment = True
 
     if obs_type == "pixels":
@@ -219,7 +226,6 @@ def main(argv=None) -> None:
     parser.add_argument("--game", default="smb", choices=sorted(GAMES))
     parser.add_argument("--obs", default="pixels", choices=OBS_TYPES)
     parser.add_argument("--frame-skip", type=int, default=4)
-    # Why do we need frame-skip?
     args = parser.parse_args(argv)
 
     demos = load_demos(args.paths, args.rom, game=args.game, obs_type=args.obs, frame_skip=args.frame_skip)
