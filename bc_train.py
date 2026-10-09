@@ -27,6 +27,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from nes_gym.bc import Dataset, balanced_accuracy, class_weights, split_segments
 from nes_gym.checkpoints import checkpoint_path, save_atomic
+from nes_gym.cli import fraction, non_negative_int, positive_int
 from nes_gym.demos import load_demos, mask_name, remap_report
 from nes_gym.games import GAMES
 from nes_gym.vec_env import make_vec_env
@@ -276,32 +277,6 @@ def _action_counts(actions: np.ndarray, game_actions: tuple[int, ...]) -> str:
     """Formats per-action pair counts, e.g. "NOOP 120, R 300"."""
     counts = np.bincount(actions, minlength=len(game_actions))
     return ", ".join(f"{mask_name(mask)} {count}" for mask, count in zip(game_actions, counts))
-
-
-def _int_at_least(minimum: int):
-    """Returns an argparse type that parses an int and rejects values below `minimum`."""
-
-    def parse(text: str) -> int:
-        value = int(text)
-        if value < minimum:
-            raise argparse.ArgumentTypeError(f"must be at least {minimum}, got {value}")
-        return value
-
-    # argparse names the type in its "invalid <name> value" error for non-numbers.
-    parse.__name__ = "int"
-    return parse
-
-
-positive_int = _int_at_least(1)
-non_negative_int = _int_at_least(0)
-
-
-def fraction(text: str) -> float:
-    """An argparse type: a float strictly between 0 and 1."""
-    value = float(text)
-    if not 0 < value < 1:
-        raise argparse.ArgumentTypeError(f"must be strictly between 0 and 1, got {value}")
-    return value
 
 
 def main(argv=None) -> None:
