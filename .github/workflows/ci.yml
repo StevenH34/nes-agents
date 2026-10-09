@@ -21,11 +21,15 @@ jobs:
       - name: Install GCC 14 and Ninja
         run: sudo apt-get update && sudo apt-get install -y g++-14 ninja-build
 
+      # CPU-only torch (~200 MB instead of ~2 GB for CUDA); the train extra then finds it already installed.
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
       - name: Install nes-agents and nes_py
         env:
           CC: gcc-14
           CXX: g++-14
-        run: python -m pip install .[test]
+        run: python -m pip install .[test,train]
 
       # Tests that need a commercial ROM (SMB_ROM etc.) skip here.
       - name: Run tests

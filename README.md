@@ -31,6 +31,15 @@ python -m pip install -e ".[test]"
 Extras: `train` (PyTorch, Stable-Baselines3, TensorBoard), `play` (OpenCV playback window), `export` (ONNX),
 `test` (pytest). Combine them as needed, e.g. `".[train,play,test]"`.
 
+To train on an NVIDIA GPU, install PyTorch's CUDA build first, so the `train` extra doesn't pull in the CPU-only
+one. Pick the CUDA version for your setup on [pytorch.org](https://pytorch.org/get-started/locally/), e.g.:
+
+```
+python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+python -m pip install -e ".[train,play,test]"
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
 ## ROMs
 
 ```
@@ -74,11 +83,55 @@ demo = demos[0]
 demo.observations, demo.actions, demo.episode_starts
 ```
 
+## Behaviour cloning
+
+`bc_train.py` (needs the `train` extra) trains a policy to copy your recordings. About 20–30 minutes of play, as
+many short clips through 1-1 and 1-2, is a reasonable start.
+
+```
+python bc_train.py --rom C:\path\to\smb.nes C:\path\to\recordings
+```
+
+- The policy is the same CNN that PPO uses, so the result loads straight into later RL training and `play.py`.
+- Whole segments (about 10% of the pairs) are held out for validation, so near-identical neighbouring frames can't
+  end up on both sides. At least 6 segments are needed.
+- Rare actions are weighted up in the loss, so the agent can't do well by only pressing Right.
+- The epoch with the lowest validation loss is saved to `bc_policy.zip` (`--out`). Ctrl-C stops early and still
+  saves the best epoch finished so far.
+- The saved policy then plays 1 argmax episode and 5 sampled ones, and reports the distance reached, how often it
+  reached the flag, and the episode length.
+- Checkpoints go to `checkpoints/<run>/step_<n>.zip` every 500 gradient steps, and TensorBoard logs to
+  `runs/<run>` (`tensorboard --logdir runs`).
+
+Options: `--game` (default `smb`), `--run` (default `bc-<date>-<time>`), `--out`, `--epochs 30`,
+`--batch-size 256`, `--lr 1e-4`, `--val-frac 0.1`, `--checkpoint-every 500`, `--eval-episodes 5`,
+`--eval-max-steps 3000`, `--device auto` (CUDA if available), `--seed 0`.
+
+## Watching an agent
+
+`play.py` (needs the `train` and `play` extras) shows an agent playing in a window, scaled 3×:
+
+```
+python play.py --rom C:\path\to\smb.nes bc_policy.zip
+python play.py --rom C:\path\to\smb.nes --follow checkpoints\bc-20261008-120000
+```
+
+- With `--follow`, it watches training as it happens: it waits for the first checkpoint, then switches to newer
+  ones between episodes. The window title shows the checkpoint's step. Checkpoints are the weights as training
+  goes, so late ones may be overfit; `bc_policy.zip` is the best epoch.
+- It runs on the CPU by default (`--device`), so it doesn't slow down training on the GPU.
+- Actions are the agent's top choice by default. `--stochastic` samples them, as training does.
+- The game and the top choices are deterministic, so plain playback plays 1 episode; `--follow` and
+  `--stochastic` play until you quit. `--episodes N` overrides this (0 plays forever).
+- Press q or Esc, or close the window, to quit.
+
+Options: `--game`, `--max-steps 3000`, `--scale 3`, `--fps 15` (agent steps per second; 15 is real speed).
+
 ## Testing
 
 `python -m pytest`
 
-Tests that need a commercial ROM are skipped unless its environment variable (e.g. `SMB_ROM`) is set. The rest run against the bundled `tests/roms/nestest.nes`.
+Tests that need a commercial ROM are skipped unless its environment variable (e.g. `SMB_ROM`) is set. The rest run against the bundled `tests/roms/nestest.nes`. Tests that need Stable-Baselines3 are skipped without the `train` extra.
 
 ## License
 
